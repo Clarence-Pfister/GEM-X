@@ -58,12 +58,21 @@ from gem.utils.cam_utils import estimate_K, get_a_pred_cam
 from gem.utils.kp2d_utils import smooth_bbx_xyxy, render_2d_keypoints
 
 CRF = 23  # 17 is lossless, +6 halves output size
+RETARGET_ROBOTS = ("g1", "g1_23dof")
+DEFAULT_RETARGET_ROBOT = "g1"
 
 
 def _open_cv2_writer(path, width, height, fps):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     return cv2.VideoWriter(str(path), fourcc, float(fps), (int(width), int(height)))
+
+
+def _set_retarget_output_paths(cfg, robot):
+    if not robot or robot == DEFAULT_RETARGET_ROBOT:
+        return
+    cfg.paths.retarget_csv = str(Path(cfg.output_dir) / f"{cfg.video_name}_retarget_{robot}.csv")
+    cfg.paths.retarget_video = str(Path(cfg.output_dir) / f"{cfg.video_name}_4_{robot}_retarget.mp4")
 
 
 def _parse_args():
@@ -78,7 +87,14 @@ def _parse_args():
     parser.add_argument("--sam3d_mhr_path", type=str, default=None)
     parser.add_argument("--ckpt", type=str, default=None)
     parser.add_argument("--exp", type=str, default="gem_soma_regression")
-    parser.add_argument("--retarget", action="store_true", help="Retarget SOMA motion to G1 robot")
+    parser.add_argument(
+        "--retarget",
+        nargs="?",
+        const=DEFAULT_RETARGET_ROBOT,
+        default=None,
+        choices=RETARGET_ROBOTS,
+        help="Retarget SOMA motion. Use '--retarget' for g1 or '--retarget g1_23dof'.",
+    )
     return parser.parse_args()
 
 
@@ -110,6 +126,7 @@ def _build_cfg(args):
 
     Path(cfg.output_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.preprocess_dir).mkdir(parents=True, exist_ok=True)
+    _set_retarget_output_paths(cfg, args.retarget)
     return cfg
 
 
@@ -453,8 +470,8 @@ def main():
 
         pred = torch.load(cfg.paths.hpe_results)
         body_params_global = _get_body_params(pred, "body_params_global")
-        csv_buffer = run_retarget(body_params_global, fps, cfg.paths.retarget_csv)
-        render_g1_robot(cfg, csv_buffer, fps=fps)
+        csv_buffer = run_retarget(body_params_global, fps, cfg.paths.retarget_csv, robot=args.retarget)
+        render_g1_robot(cfg, csv_buffer, fps=fps, robot=args.retarget)
         kp2d_video = str(Path(cfg.output_dir) / "0_kp2d77_overlay.mp4")
         merge_videos_grid_2x2(
             [kp2d_video, cfg.paths.incam_video, cfg.paths.global_video, cfg.paths.retarget_video],
