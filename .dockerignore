@@ -1,0 +1,14 @@
+# Build artifacts and local environments that must not enter the image.
+# COPY . /workspace/gem would otherwise copy a developer's local .venv,
+# which makes the subsequent `uv venv .venv` fail with
+# "A virtual environment already exists at: .venv".
+.venv
+outputs
+inputs
+**/__pycache__
+*.egg-info
+.ruff_cache
+wandb
+
+# NOTE: do not ignore .git — the Dockerfile runs `git lfs pull` inside
+# third_party/soma, which needs the superproject's git metadata.
