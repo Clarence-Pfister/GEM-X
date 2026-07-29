@@ -971,6 +971,7 @@ class GEM(pl.LightningModule):
             "obs": obs,
             "bbx_xys": batch["bbx_xys"],
             "K_fullimg": batch["K_fullimg"],
+            "kp2d": batch["kp2d"],
             "cam_angvel": batch["cam_angvel"].clone(),
             "f_cam_angvel": batch["cam_angvel"].clone(),
             "f_imgseq": batch["f_imgseq"],
@@ -986,6 +987,9 @@ class GEM(pl.LightningModule):
             "mask": batch["mask"],
             "sample_indices_dict": self.endecoder.obs_indices_dict,
         }
+        for key in ("R_w2c", "T_w2c", "ground_normal_world", "ground_plane_offset"):
+            if key in batch:
+                batch_[key] = batch[key]
         if "music_embed" in batch:
             batch_["music_embed"] = batch["music_embed"]
         if "audio_array" in batch:
@@ -1161,10 +1165,12 @@ class GEM(pl.LightningModule):
             "obs": normalize_kp2d(data["kp2d"], data["bbx_xys"])[None].cuda(),
             "bbx_xys": data["bbx_xys"][None].cuda(),
             "K_fullimg": data["K_fullimg"][None].cuda(),
+            "kp2d": data["kp2d"][None].cuda(),
             "cam_angvel": data["cam_angvel"][None].cuda(),
             "f_cam_angvel": data["cam_angvel"][None].cuda(),
             "cam_tvel": data["cam_tvel"][None].cuda(),
             "R_w2c": data["R_w2c"][None].cuda(),
+            "T_w2c": data["T_w2c"][None].cuda(),
             "f_imgseq": data["f_imgseq"][None].cuda(),
             # "text_embed": data["text_embed"][None].cuda(),
             "has_text": data["has_text"].cuda(),
@@ -1176,6 +1182,10 @@ class GEM(pl.LightningModule):
             ).cuda(),
             "sample_indices_dict": self.endecoder.obs_indices_dict,
         }
+        if "ground_normal_world" in data:
+            batch["ground_normal_world"] = data["ground_normal_world"][None].cuda()
+        if "ground_plane_offset" in data:
+            batch["ground_plane_offset"] = data["ground_plane_offset"][None].cuda()
         if "music_embed" in data:
             batch["music_embed"] = data["music_embed"][None].cuda()
         if "audio_array" in data:

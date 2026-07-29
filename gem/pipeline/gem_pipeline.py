@@ -36,6 +36,25 @@ from gem.utils.soma_augment import NVSKEL_LFINGERS_IDX, NVSKEL_RFINGERS_IDX
 from gem.utils.soma_utils.soma_layer import SomaLayer
 
 
+def estimate_ground_normal_world(inputs, static_cam=False):
+    """Estimate framewise ground normals in GEM world coordinates from camera cues."""
+    if "ground_normal_world" in inputs:
+        return inputs["ground_normal_world"]
+
+    R_w2c = inputs.get("R_w2c", None)
+    if R_w2c is None:
+        return None
+
+    camera_up = R_w2c.new_tensor([0.0, -1.0, 0.0])
+    ground_normal = torch.einsum("...ji,j->...i", R_w2c.float(), camera_up)
+    ground_normal = F.normalize(ground_normal, dim=-1)
+    ground_normal = torch.where(ground_normal[..., 1:2] < 0, -ground_normal, ground_normal)
+
+    if static_cam and ground_normal.ndim >= 3:
+        ground_normal = ground_normal[:, :1].expand_as(ground_normal)
+    return ground_normal.to(dtype=R_w2c.dtype)
+
+
 class Pipeline(nn.Module):
     def __init__(self, args, args_denoiser3d, **kwargs):
         super().__init__()
@@ -194,6 +213,13 @@ class Pipeline(nn.Module):
 
             if "static_conf_logits" in model_output:
                 outputs["static_conf_logits"] = model_output["static_conf_logits"]
+
+            ground_normal_world = estimate_ground_normal_world(inputs, static_cam=static_cam)
+            if ground_normal_world is not None:
+                outputs["ground_normal_world"] = ground_normal_world
+            for key in ("ground_plane_offset", "kp2d", "K_fullimg", "T_w2c", "R_w2c"):
+                if key in inputs:
+                    outputs[key] = inputs[key]
 
             # Contact-based postprocessing: refine translation + IK
             if (

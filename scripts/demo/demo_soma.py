@@ -56,6 +56,7 @@ from gem.utils.vis.o3d_render import Settings, create_meshes, get_ground
 from gem.utils.vis.renderer import get_global_cameras_static_v2, get_ground_params_from_points
 from gem.utils.cam_utils import estimate_K, get_a_pred_cam
 from gem.utils.kp2d_utils import smooth_bbx_xyxy, render_2d_keypoints
+from gem.utils.ground_plane_estimator import estimate_ground_plane_from_video
 
 CRF = 23  # 17 is lossless, +6 halves output size
 
@@ -73,6 +74,13 @@ def _parse_args():
     parser.add_argument("-s", "--static_cam", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--render_mhr", action="store_true")
+    parser.add_argument("--estimate_ground_plane", action="store_true")
+    parser.add_argument("--ground_depth_model", type=str, default=None)
+    parser.add_argument("--ground_seg_model", type=str, default=None)
+    parser.add_argument("--ground_depth_path", type=str, default=None)
+    parser.add_argument("--ground_mask_path", type=str, default=None)
+    parser.add_argument("--ground_plane_stride", type=int, default=1)
+    parser.add_argument("--ground_plane_no_depth_offset", action="store_true")
 
     parser.add_argument("--sam3d_ckpt_path", type=str, default=None)
     parser.add_argument("--sam3d_mhr_path", type=str, default=None)
@@ -95,11 +103,22 @@ def _build_cfg(args):
         f"static_cam={str(args.static_cam).lower()}",
         f"verbose={str(args.verbose).lower()}",
         f"render_mhr={str(args.render_mhr).lower()}",
+        f"estimate_ground_plane={str(args.estimate_ground_plane).lower()}",
+        f"ground_plane_stride={args.ground_plane_stride}",
+        f"ground_plane_use_depth_offset={str(not args.ground_plane_no_depth_offset).lower()}",
         "use_wandb=false",
         "task=test",
     ]
     if args.ckpt is not None:
         overrides.append(f"ckpt_path={args.ckpt}")
+    if args.ground_depth_model is not None:
+        overrides.append(f"ground_depth_model={args.ground_depth_model}")
+    if args.ground_seg_model is not None:
+        overrides.append(f"ground_seg_model={args.ground_seg_model}")
+    if args.ground_depth_path is not None:
+        overrides.append(f"ground_depth_path={args.ground_depth_path}")
+    if args.ground_mask_path is not None:
+        overrides.append(f"ground_mask_path={args.ground_mask_path}")
     if args.sam3d_ckpt_path is not None:
         overrides.append(f"sam3d_ckpt_path={args.sam3d_ckpt_path}")
     if args.sam3d_mhr_path is not None:
@@ -196,6 +215,30 @@ def run_preprocess(cfg):
         eye = torch.eye(4).unsqueeze(0).repeat(L, 1, 1).numpy()
         torch.save(eye, paths.slam)
 
+    if cfg.get("estimate_ground_plane", False) and not Path(paths.ground_plane).exists():
+        Log.info("[Preprocess] Estimating ground plane from segmentation/depth...")
+        K_fullimg = estimate_K(W, H).repeat(L, 1, 1)
+        if cfg.static_cam:
+            T_w2c = torch.eye(4).unsqueeze(0).repeat(L, 1, 1)
+        else:
+            T_w2c = normalize_T_w2c(torch.as_tensor(torch.load(paths.slam)).float())
+        bbx_data = torch.load(paths.bbx)
+        estimate_ground_plane_from_video(
+            video_path,
+            K_fullimg,
+            T_w2c,
+            bbx_xyxy=bbx_data.get("bbx_xyxy", None),
+            static_camera=cfg.static_cam,
+            depth_model=cfg.get("ground_depth_model", None),
+            seg_model=cfg.get("ground_seg_model", None),
+            depth_path=cfg.get("ground_depth_path", None),
+            mask_path=cfg.get("ground_mask_path", None),
+            output_path=paths.ground_plane,
+            device="cuda:0",
+            stride=cfg.get("ground_plane_stride", 1),
+            use_depth_offset=cfg.get("ground_plane_use_depth_offset", True),
+        )
+
     if not Path(paths.vit_features).exists():
         extractor = SAM3DBExtractor(
             checkpoint_path=cfg.get("sam3d_ckpt_path", None),
@@ -240,7 +283,7 @@ def load_data_dict(cfg):
         R_w2c = T_w2c[:, :3, :3]
         t_w2c = T_w2c[:, :3, 3]
 
-    return {
+    data = {
         "meta": [{"vid": Path(cfg.video_path).stem}],
         "length": torch.tensor(length),
         "bbx_xys": bbx_xys,
@@ -262,6 +305,13 @@ def load_data_dict(cfg):
             "has_music_mask": torch.zeros(length).bool(),
         },
     }
+    if Path(paths.ground_plane).exists():
+        ground = torch.load(paths.ground_plane)
+        if "ground_normal_world" in ground:
+            data["ground_normal_world"] = ground["ground_normal_world"].float()
+        if "ground_plane_offset" in ground:
+            data["ground_plane_offset"] = ground["ground_plane_offset"].float()
+    return data
 
 
 def _get_body_params(pred, key):
