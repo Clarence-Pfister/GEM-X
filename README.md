@@ -14,6 +14,7 @@
 | `feature/g1-23dof-retargeting` | Adds a 23-DoF Unitree G1 retargeting target (`--retarget g1_23dof`). |
 | `feature/ground-plane-estimation` | Ground-plane estimation to reduce foot-float / root drift in recovered motion. |
 | `fix/onnxruntime-linux` | Installs `onnxruntime` on Linux, which upstream `install_env.sh` only does on macOS. Without it every demo fails at preprocess. |
+| `fix/stale-requirements` | Removes `requirements.txt`, which nothing references and whose pins conflict with the documented install path. |
 | `integration/all` | All of the above merged; the branch to actually run. |
 
 Each feature branch is cut from `main` and is meant to stay independently
