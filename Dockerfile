@@ -5,7 +5,9 @@ FROM nvidia/cuda:12.6.0-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# System dependencies
+# System dependencies.
+# Ubuntu 22.04 only ships Python 3.10; it is installed here solely to
+# bootstrap pip/uv. The project venv itself is created on 3.12 below.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.10 \
     python3.10-venv \
@@ -31,8 +33,13 @@ RUN pip install uv
 WORKDIR /workspace/gem
 COPY . /workspace/gem
 
-# Create virtual environment
-RUN uv venv .venv --python 3.10
+# Create virtual environment.
+# Python 3.12 is required: docs/INSTALL.md states 3.12+, and
+# third_party/soma-retargeter declares requires-python = ">=3.12", so a 3.10
+# venv makes the retargeting step in INSTALL.md Step 6 uninstallable.
+# uv fetches a standalone 3.12 build, so no deadsnakes PPA is needed.
+RUN uv python install 3.12
+RUN uv venv .venv --python 3.12
 
 # Install PyTorch
 RUN . .venv/bin/activate && \
