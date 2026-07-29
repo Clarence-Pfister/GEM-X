@@ -23,6 +23,15 @@ render_mhr: false
 max_frames: -1
 detector_name: vitdet
 
+# Optional ground-plane estimation from segmentation/depth.
+estimate_ground_plane: false
+ground_depth_model: null
+ground_seg_model: null
+ground_depth_path: null
+ground_mask_path: null
+ground_plane_stride: 1
+ground_plane_use_depth_offset: true
+
 # Optional explicit checkpoint for demo loading.
 ckpt_path: null
 sam3d_ckpt_path: null
@@ -33,6 +42,7 @@ paths:
   vitpose: ${preprocess_dir}/vitpose.pt
   vit_features: ${preprocess_dir}/vit_features.pt
   slam: ${preprocess_dir}/camera.pt
+  ground_plane: ${preprocess_dir}/ground_plane.pt
   hpe_results: ${output_dir}/hpe_results.pt
   incam_video: ${output_dir}/${video_name}_1_incam.mp4
   global_video: ${output_dir}/${video_name}_2_global.mp4
