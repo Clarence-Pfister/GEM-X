@@ -6,5 +6,5 @@
 	url = https://github.com/NVlabs/SOMA-X.git
 [submodule "third_party/soma-retargeter"]
 	path = third_party/soma-retargeter
-	url = https://github.com/Clarence-Pfister/soma-retargeter.git
+	url = https://github.com/Clarence-Pfister/SOMA-Retargeter.git
 	branch = feature/g1-23dof-retargeting
