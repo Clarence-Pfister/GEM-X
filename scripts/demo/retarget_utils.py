@@ -23,11 +23,73 @@ if str(SOMA_RETARGETER_ROOT) not in sys.path:
 from soma_retargeter.animation.animation_buffer import AnimationBuffer
 from soma_retargeter.animation.skeleton import Skeleton
 from soma_retargeter.assets.bvh import BVHImporter
-from soma_retargeter.assets.csv import save_csv
+from soma_retargeter.assets.csv import UnitreeG123DOF_CSVConfig, save_csv
 from soma_retargeter.pipelines.newton_pipeline import NewtonPipeline
 from soma_retargeter.robotics.csv_animation_buffer import CSVAnimationBuffer
 from soma_retargeter.utils import io_utils as retargeter_io
 from soma_retargeter.utils.space_conversion_utils import FacingDirectionType, SpaceConverter
+
+RETARGET_ROBOTS = ("g1", "g1_23dof")
+DEFAULT_RETARGET_ROBOT = "g1"
+G1_23DOF_MJCF_PATH = PROJECT_ROOT / "assets" / "robots" / "g1_23dof_holo_compat" / "g1_23dof_holo_compat.xml"
+_G1_23DOF_CSV_CONFIG = UnitreeG123DOF_CSVConfig()
+
+
+def normalize_retarget_robot(robot: str | None = None) -> str:
+    if robot is None or robot is True:
+        robot = DEFAULT_RETARGET_ROBOT
+    robot = str(robot).lower()
+    aliases = {
+        "unitree_g1": "g1",
+        "g1_29dof": "g1",
+        "unitree_g1_23dof": "g1_23dof",
+    }
+    robot = aliases.get(robot, robot)
+    if robot not in RETARGET_ROBOTS:
+        allowed = ", ".join(RETARGET_ROBOTS)
+        raise ValueError(f"Unknown retarget robot [{robot}]. Allowed values: {allowed}")
+    return robot
+
+
+def _robot_display_name(robot: str) -> str:
+    return {"g1": "G1", "g1_23dof": "G1 23-DoF"}[normalize_retarget_robot(robot)]
+
+
+def _load_g1_23dof_retarget_config():
+    config = retargeter_io.load_json(
+        retargeter_io.get_config_file("unitree_g1", "soma_to_g1_23dof_retargeter_config.json")
+    )
+    config["mjcf_path"] = str(G1_23DOF_MJCF_PATH)
+    return config
+
+
+def _retarget_config_for_robot(robot: str):
+    robot = normalize_retarget_robot(robot)
+    if robot == "g1_23dof":
+        return _load_g1_23dof_retarget_config()
+    return None
+
+
+def _csv_config_for_robot(robot: str):
+    robot = normalize_retarget_robot(robot)
+    if robot == "g1_23dof":
+        return _G1_23DOF_CSV_CONFIG
+    return None
+
+
+def _build_retarget_pipeline(skeleton: Skeleton, robot: str) -> NewtonPipeline:
+    retarget_config = _retarget_config_for_robot(robot)
+    if retarget_config is None:
+        return NewtonPipeline(skeleton, "soma", "unitree_g1")
+    return NewtonPipeline(skeleton, "soma", "unitree_g1", retarget_config=retarget_config)
+
+
+def _save_robot_csv(output_csv_path: str, csv_buffer: CSVAnimationBuffer, robot: str) -> None:
+    csv_config = _csv_config_for_robot(robot)
+    if csv_config is None:
+        save_csv(output_csv_path, csv_buffer)
+    else:
+        save_csv(output_csv_path, csv_buffer, csv_config)
 
 # ---------------------------------------------------------------------------
 # Step 1a: Load the reference SOMA skeleton from the BVH file
@@ -321,17 +383,20 @@ def run_retarget(
     body_params_global: dict,
     fps: float,
     output_csv_path: str,
+    robot: str = DEFAULT_RETARGET_ROBOT,
 ) -> CSVAnimationBuffer:
     """Retarget GEM SOMA body params to the Unitree G1 robot.
 
     Args:
         body_params_global: dict with ``global_orient``, ``body_pose``, ``transl``.
         fps: source video fps.
-        output_csv_path: where to write the CSV with G1 joint angles.
+        output_csv_path: where to write the CSV with robot joint angles.
+        robot: target robot name, either ``g1`` or ``g1_23dof``.
 
     Returns:
         ``CSVAnimationBuffer`` for the G1 robot.
     """
+    robot = normalize_retarget_robot(robot)
     identity_coeffs = body_params_global["identity_coeffs"]
     scale_params = body_params_global["scale_params"]
     skeleton = build_soma_skeleton_from_model(identity_coeffs, scale_params)
@@ -341,16 +406,16 @@ def run_retarget(
     space_converter = SpaceConverter(FacingDirectionType.MUJOCO)
     offset = space_converter.transform(wp.transform_identity())
 
-    pipeline = NewtonPipeline(skeleton, "soma", "unitree_g1")
+    pipeline = _build_retarget_pipeline(skeleton, robot)
     pipeline.add_input_motions([anim_buffer], [offset], scale_animation=True)
     csv_buffers = pipeline.execute()
 
     Path(output_csv_path).parent.mkdir(parents=True, exist_ok=True)
-    save_csv(output_csv_path, csv_buffers[0])
-    print(f"[INFO] Saved G1 retarget CSV to {output_csv_path}")
+    _save_robot_csv(output_csv_path, csv_buffers[0], robot)
+    print(f"[INFO] Saved {_robot_display_name(robot)} retarget CSV to {output_csv_path}")
 
     # Also run BVH-based retarget for comparison (exports BVH as a side effect)
-    run_retarget_from_bvh(body_params_global, fps, output_csv_path, skeleton=skeleton)
+    run_retarget_from_bvh(body_params_global, fps, output_csv_path, skeleton=skeleton, robot=robot)
 
     return csv_buffers[0]
 
@@ -360,10 +425,12 @@ def run_retarget_from_bvh(
     fps: float,
     output_csv_path: str,
     skeleton: Skeleton = None,
+    robot: str = DEFAULT_RETARGET_ROBOT,
 ) -> CSVAnimationBuffer:
     """Retarget via BVH round-trip: export SOMA BVH, load it, retarget to G1."""
     from soma_retargeter.assets.bvh import load_bvh
 
+    robot = normalize_retarget_robot(robot)
     if skeleton is None:
         identity_coeffs = body_params_global["identity_coeffs"]
         scale_params = body_params_global["scale_params"]
@@ -380,14 +447,14 @@ def run_retarget_from_bvh(
     space_converter = SpaceConverter(FacingDirectionType.MUJOCO)
     offset = space_converter.transform(wp.transform_identity())
 
-    pipeline = NewtonPipeline(bvh_skeleton, "soma", "unitree_g1")
+    pipeline = _build_retarget_pipeline(bvh_skeleton, robot)
     pipeline.add_input_motions([anim_buffer], [offset], scale_animation=True)
     csv_buffers = pipeline.execute()
 
     csv_path_bvh = str(Path(output_csv_path).with_stem(Path(output_csv_path).stem + "_from_bvh"))
     Path(csv_path_bvh).parent.mkdir(parents=True, exist_ok=True)
-    save_csv(csv_path_bvh, csv_buffers[0])
-    print(f"[INFO] Saved G1 retarget CSV (BVH path) to {csv_path_bvh}")
+    _save_robot_csv(csv_path_bvh, csv_buffers[0], robot)
+    print(f"[INFO] Saved {_robot_display_name(robot)} retarget CSV (BVH path) to {csv_path_bvh}")
 
     return csv_buffers[0]
 
@@ -440,7 +507,16 @@ def _parse_mjcf_meshes(mjcf_path: Path):
     return results
 
 
-def _load_g1_meshes():
+
+def _mjcf_mesh_dir(mjcf_path: Path) -> Path:
+    tree = ET.parse(mjcf_path)
+    root = tree.getroot()
+    compiler = root.find("compiler")
+    mesh_dir = compiler.get("meshdir", "") if compiler is not None else ""
+    return (mjcf_path.parent / mesh_dir).resolve()
+
+
+def _load_g1_meshes(robot: str = DEFAULT_RETARGET_ROBOT):
     """Load G1 robot mesh geometry from MJCF + STL files.
 
     Returns:
@@ -451,9 +527,14 @@ def _load_g1_meshes():
     import open3d as o3d
     import trimesh
 
-    asset_path = newton.utils.download_asset("unitree_g1")
-    mjcf_path = asset_path / "mjcf" / "g1_29dof_rev_1_0.xml"
-    meshes_dir = asset_path / "meshes"
+    robot = normalize_retarget_robot(robot)
+    if robot == "g1_23dof":
+        mjcf_path = G1_23DOF_MJCF_PATH.resolve()
+        meshes_dir = _mjcf_mesh_dir(mjcf_path)
+    else:
+        asset_path = newton.utils.download_asset("unitree_g1")
+        mjcf_path = asset_path / "mjcf" / "g1_29dof_rev_1_0.xml"
+        meshes_dir = asset_path / "meshes"
 
     geom_infos = _parse_mjcf_meshes(mjcf_path)
 
@@ -491,7 +572,12 @@ def _load_g1_meshes():
     return body_geoms, mjcf_path
 
 
-def render_g1_robot(cfg, csv_buffer: CSVAnimationBuffer, fps: float = 30):
+def render_g1_robot(
+    cfg,
+    csv_buffer: CSVAnimationBuffer,
+    fps: float = 30,
+    robot: str = DEFAULT_RETARGET_ROBOT,
+):
     """Render the G1 robot motion to video using Open3D OffscreenRenderer.
 
     Args:
@@ -507,8 +593,10 @@ def render_g1_robot(cfg, csv_buffer: CSVAnimationBuffer, fps: float = 30):
     from gem.utils.vis.o3d_render import Settings, get_ground
     from gem.utils.vis.renderer import get_global_cameras_static_v2, get_ground_params_from_points
 
+    robot = normalize_retarget_robot(robot)
+
     # --- Load G1 meshes ---
-    body_geoms, mjcf_path = _load_g1_meshes()
+    body_geoms, mjcf_path = _load_g1_meshes(robot)
 
     # --- Build Newton model for FK ---
     builder = newton.ModelBuilder()
@@ -605,7 +693,7 @@ def render_g1_robot(cfg, csv_buffer: CSVAnimationBuffer, fps: float = 30):
     writer = cv2.VideoWriter(str(output_path), fourcc, float(fps), (int(width), int(height)))
 
     prev_mesh_names = []
-    for t in tqdm(range(num_frames), desc="Render G1"):
+    for t in tqdm(range(num_frames), desc=f"Render {_robot_display_name(robot)}"):
         # Remove previous frame meshes
         for name in prev_mesh_names:
             renderer.scene.remove_geometry(name)
@@ -655,4 +743,4 @@ def render_g1_robot(cfg, csv_buffer: CSVAnimationBuffer, fps: float = 30):
         writer.write(frame[..., ::-1])
 
     writer.release()
-    print(f"[INFO] Saved G1 robot video to {output_path}")
+    print(f"[INFO] Saved {_robot_display_name(robot)} robot video to {output_path}")

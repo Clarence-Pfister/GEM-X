@@ -31,6 +31,8 @@ import time
 from pathlib import Path
 
 _timings: dict[str, float] = {}
+RETARGET_ROBOTS = ("g1", "g1_23dof")
+DEFAULT_RETARGET_ROBOT = "g1"
 
 os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
 os.environ.setdefault("EGL_PLATFORM", "surfaceless")
@@ -733,6 +735,13 @@ def run_denoiser_onnx(runner, backend, batch):
 # ──────────────────────────────────────────────────────────────────────
 
 
+def _set_retarget_output_paths(cfg, robot):
+    if not robot or robot == DEFAULT_RETARGET_ROBOT:
+        return
+    cfg.paths.retarget_csv = str(Path(cfg.output_dir) / f"{cfg.video_name}_retarget_{robot}.csv")
+    cfg.paths.retarget_video = str(Path(cfg.output_dir) / f"{cfg.video_name}_4_{robot}_retarget.mp4")
+
+
 def _parse_args():
     parser = argparse.ArgumentParser(description="GEM accelerated demo (ONNX/TRT)")
     parser.add_argument("--video", type=str, required=True)
@@ -746,7 +755,14 @@ def _parse_args():
         action="store_true",
         help="Force PyTorch inference even if ONNX/TRT available",
     )
-    parser.add_argument("--retarget", action="store_true")
+    parser.add_argument(
+        "--retarget",
+        nargs="?",
+        const=DEFAULT_RETARGET_ROBOT,
+        default=None,
+        choices=RETARGET_ROBOTS,
+        help="Retarget SOMA motion. Use '--retarget' for g1 or '--retarget g1_23dof'.",
+    )
     parser.add_argument(
         "--no-imgfeat",
         action="store_true",
@@ -787,6 +803,7 @@ def _build_cfg(args):
 
     Path(cfg.output_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.preprocess_dir).mkdir(parents=True, exist_ok=True)
+    _set_retarget_output_paths(cfg, args.retarget)
     return cfg
 
 
@@ -1295,9 +1312,9 @@ def main():
             fps=fps,
         )
         pred = torch.load(cfg.paths.hpe_results)
-        csv_buffer = run_retarget(pred["body_params_global"], fps, cfg.paths.retarget_csv)
-        render_g1_robot(cfg, csv_buffer, fps=fps)
-        _timings["Retargeting (G1)"] = time.time() - t0
+        csv_buffer = run_retarget(pred["body_params_global"], fps, cfg.paths.retarget_csv, robot=args.retarget)
+        render_g1_robot(cfg, csv_buffer, fps=fps, robot=args.retarget)
+        _timings[f"Retargeting ({args.retarget})"] = time.time() - t0
         merge_videos_grid_2x2(
             [kp2d_video, cfg.paths.incam_video, cfg.paths.global_video, cfg.paths.retarget_video],
             cfg.paths.incam_global_horiz_video,
