@@ -5,6 +5,11 @@ FROM nvidia/cuda:12.6.0-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# The CUDA wheels pulled below are large (cudnn 674MB, cublas 375MB,
+# cusparselt 274MB). uv's default 30s HTTP timeout is easily exceeded on
+# an ordinary connection, failing the build mid-download.
+ENV UV_HTTP_TIMEOUT=600
+
 # System dependencies.
 # Ubuntu 22.04 only ships Python 3.10; it is installed here solely to
 # bootstrap pip/uv. The project venv itself is created on 3.12 below.
