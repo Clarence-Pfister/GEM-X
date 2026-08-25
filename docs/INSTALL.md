@@ -63,11 +63,6 @@ To enable `--retarget` mode (retarget recovered motion to the Unitree G1 robot):
 uv pip install -e third_party/soma-retargeter
 ```
 
-> **Note:** The soma-retargeter submodule requires SSH access. If `third_party/soma-retargeter` is empty, run:
-> ```bash
-> git submodule update --init third_party/soma-retargeter
-> ```
-
 ## Step 7 — Third-party model assets
 
 **SOMA body model** — follow `third_party/soma/README.md` and place model assets under `inputs/soma_assets/`.
